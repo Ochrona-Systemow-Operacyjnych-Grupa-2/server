@@ -1,6 +1,8 @@
+import random
 import socketserver
 import os
 import json
+from datetime import datetime
 
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
@@ -60,12 +62,98 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
         ))
 
         # receive the encrypted message from the client
-        self.data = self.request.recv(4096)
+        while True:
+            self.data = self.request.recv(4096)
+            self.data = json.loads(self.data.decode())
+            print(f"Received message: {self.data}")
+            if self.data["command"] == "register":
+                self.data["payload"]["username"] = decrypt_message(private_key, bytes.fromhex(self.data["payload"]["username"]))
+                if any(d.get("username") == self.data["payload"]["username"] for d in host_db):
+                    self.request.sendall(json.dumps({
+                        "timestamp": datetime.now().isoformat(),
+                        "command": "register",
+                        "payload": {
+                            "status": "fail",
+                            "message": "Username already exists"
+                        }
+                    }).encode())
+                    break
+                else:
+                    host_db.append({"username":self.data["payload"]["username"], "public_key": client_public})
+                    self.request.sendall(json.dumps({
+                        "timestamp": datetime.now().isoformat(),
+                        "command": "register",
+                        "payload": {
+                            "status": "success",
+                            "message": "User registered successfully"
+                        }
+                    }).encode())
+                    print(f"User {self.data['payload']['username']} registered successfully")
+            elif self.data["command"] == "login":
+                self.data["payload"]["username"] = decrypt_message(private_key, bytes.fromhex(self.data["payload"]["username"]))
+                if not any(d.get("username") == self.data["payload"]["username"] for d in host_db):
+                    self.request.sendall(json.dumps({
+                        "timestamp": datetime.now().isoformat(),
+                        "command": "login",
+                        "payload": {
+                            "status": "fail",
+                            "message": "Username does not exist"
+                        }
+                    }).encode())
+                else:
+                    if self.data["payload"]["username"] in connected:
+                        self.request.sendall(json.dumps({
+                            "timestamp": datetime.now().isoformat(),
+                            "command": "login",
+                            "payload": {
+                                "status": "fail",
+                                "message": "User already logged in"
+                            }
+                        }).encode())
+                        break
+                    elif any(d.get("public_key") == client_public for d in host_db):
+                        # Generate a random token for the user
+                        token = random.randint(100000, 999999)
+                        connected[self.data["payload"]["username"]] = [self.request, token]
+                        self.request.sendall(json.dumps({
+                            "timestamp": datetime.now().isoformat(),
+                            "command": "login",
+                            "payload": {
+                                "status": "success",
+                                "message": "User logged in successfully",
+                                "token": encrypt_message(client_public, str(token).encode()).hex(),
+                            }
+                        }).encode())
+                        print(f"User {self.data['payload']['username']} logged in with token {token}")
+            elif self.data["command"] == "logout":
+                self.data["payload"]["username"] = decrypt_message(private_key, bytes.fromhex(self.data["payload"]["username"]))
+                if self.data["payload"]["username"] not in connected:
+                    self.request.sendall(json.dumps({
+                        "timestamp": datetime.now().isoformat(),
+                        "command": "logout",
+                        "payload": {
+                            "status": "fail",
+                            "message": "User not logged in"
+                        }
+                    }).encode())
+                    return
+                else:
+                    del connected[self.data["payload"]["username"]]
+                    self.request.sendall(json.dumps({
+                        "timestamp": datetime.now().isoformat(),
+                        "command": "logout",
+                        "payload": {
+                            "status": "success",
+                            "message": "User logged out successfully"
+                        }
+                    }).encode())
+                    print(f"User {self.data['payload']['username']} logged out successfully")
+                    return
+            #host_db.remove({"username":self.data["payload"]["username"], "public_key": client_public})
+        if self.data["payload"]["username"] in connected:
+            del connected[self.data["payload"]["username"]]
+
         
-        self.data = json.loads(self.data.decode())
-        if self.data["command"] == "register":
-            self.data["payload"]["username"] = decrypt_message(private_key, bytes.fromhex(self.data["payload"]["username"]))
-        print(f"Received message: {self.data}")
 
 
 
@@ -109,6 +197,9 @@ def generate_keys(key_size):
 if __name__ == "__main__":
     HOST, PORT = "192.168.0.4", 9999
     KEY_SIZE = 2048
+
+    connected = {}
+    host_db = [{"username": "admin", "public_key": "admin"}]
 
     private_key, public_key = generate_keys(KEY_SIZE)
     with ThreadedTCPServer((HOST, PORT), MyTCPHandler) as server:
