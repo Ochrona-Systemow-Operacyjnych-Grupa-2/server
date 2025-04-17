@@ -178,7 +178,7 @@ def connection_handler(client, addr):
     while True:
         msg = client.recv(1024).decode('utf-8')
         command = json.loads(msg)['command']
-        print(command)
+        print(json.loads(msg))
         match command:
             case 'register':
                 command_register(client, json.loads(msg)['payload'])
@@ -190,7 +190,7 @@ def connection_handler(client, addr):
                 command_logout(client, json.loads(msg)['payload'])
             case 'online_list':
                 command_online_list(client)
-            case 'send':
+            case 'message':
                 command_send(client, json.loads(msg))
             case 'sync':
                 command_sync(client, json.loads(msg)['payload'])
