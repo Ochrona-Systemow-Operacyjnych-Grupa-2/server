@@ -199,16 +199,17 @@ def connection_handler(client, addr):
                 exit(0)
 
 
-server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-if len(sys.argv) != 3:
-    server.bind(('localhost', 6969))
-else:
-    server.bind((sys.argv[1], int(sys.argv[2])))
-active_users = []
-create_tables()
-server.listen(100)
+if __name__ == "__main__":
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    if len(sys.argv) != 3:
+        server.bind(('localhost', 6969))
+    else:
+        server.bind((sys.argv[1], int(sys.argv[2])))
+    active_users = []
+    create_tables()
+    server.listen(100)
 
-print('[!] Rozpoczynam słuchanie.')
-while True:
-    client, addr = server.accept()
-    threading.Thread(target=connection_handler, args=(client, addr)).start()
+    print('[!] Rozpoczynam słuchanie.')
+    while True:
+        client, addr = server.accept()
+        threading.Thread(target=connection_handler, args=(client, addr)).start()
