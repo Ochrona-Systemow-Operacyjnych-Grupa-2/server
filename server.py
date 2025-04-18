@@ -225,7 +225,7 @@ def connection_handler(client, addr):
                 command_login(client, json.loads(msg)['payload'], True, temp_token)
             case 'logout':
                 command_logout(client, json.loads(msg)['payload'])
-            case 'online_list':
+            case 'online-list':
                 command_online_list(client)
             case 'message':
                 command_send(client, json.loads(msg))
