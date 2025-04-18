@@ -3,12 +3,28 @@ import socket
 import threading
 import sys
 import json
+import datetime
 import sqlite3
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_OAEP
 
 NULL_TOKEN = 0
 
+# only for err/ack responses
+def gen_response(rtype, message):
+    if rtype != "error" and rtype != "ack":
+        raise ValueError("Wrong type passed for response generation")
+
+    timestamp = datetime.datetime.now().isoformat()
+
+    response = {
+        "timestamp": timestamp, 
+        "type": rtype, 
+        "response": {
+            "message": message
+        }
+    }
+    return json.dumps(response)
 
 def create_tables():
     connection_obj = sqlite3.connect('database.db')
@@ -38,14 +54,14 @@ def command_register(sender, payload):
     for user_info in user_list:
         user = user_info[0]
         if user == payload['name']:
-            sender.send('Nazwa użytkownika zajęta.'.encode('utf-8'))
+            sender.send(gen_response('error', 'username already exists').encode())
             connection_obj.close()
             return
 
     cursor_obj.execute("INSERT INTO users (name, pub) VALUES (?, ?)", (payload['name'], payload['pub']))
     connection_obj.commit()
     connection_obj.close()
-    sender.send('Zarejestrowano pomyślnie.'.encode('utf-8'))
+    sender.send(gen_response('ack', 'registered succesfully').encode())
     return
 
 
@@ -65,7 +81,7 @@ def command_login(sender, payload, existence_checked, given_token):
                 break
 
         if not user_exists:
-            sender.send('Użytkownik nie istnieje.'.encode('utf-8'))
+            sender.send(gen_response('error', 'user does not exist').encode())
             return NULL_TOKEN
 
         token = hex(int(time.time()))
@@ -78,16 +94,16 @@ def command_login(sender, payload, existence_checked, given_token):
     if received_token == given_token:
         for user in active_users:
             if user['name'] == payload['name'] and user['socket'] == sender:
-                sender.send("Użytkownik jest już zalogowany.".encode('utf-8'))
+                sender.send(gen_response('error', 'user is already logged in').encode())
                 return NULL_TOKEN
-        sender.send('Zalogowano pomyślnie.'.encode('utf-8'))
+        sender.send(gen_response('ack', 'logged in succesfully').encode())
         active_users.append({
             'name': payload['name'],
             'token': received_token,
             'socket': sender
         })
     else:
-        sender.send('Nieprawidłowe dane logowania (prawdopodobnie posiadasz zły klucz prywatny).'.encode('utf-8'))
+        sender.send(gen_response('error', 'invalid login data (your priv key is probably wrong)').encode())
     return NULL_TOKEN
 
 
@@ -95,14 +111,35 @@ def command_logout(sender, payload):
     for user in active_users:
         if payload['name'] == user['name']:
             active_users.remove(user)
-            sender.send('Pomyślnie wylogowano Cię z sesji.'.encode('utf-8'))
+            sender.send(gen_response('ack', 'logged out succesfully').encode())
             return
-    sender.send('Użytkownik nie jest zalogowany.'.encode('utf-8'))
+    sender.send(gen_response('error', 'you are not logged in').encode())
     return
 
 
 def command_online_list(sender):
-    sender.send(str(active_users).encode('utf-8'))
+    active_users_list = {
+      "timestamp": datetime.datetime.now().isoformat(),
+      "type": "online-list",
+      "response": {
+        "users": []
+      }
+    }
+
+    connection_obj = sqlite3.connect('database.db')
+    cursor_obj = connection_obj.cursor()
+
+    for user in active_users:
+        username = user['name']
+        cursor_obj.execute("SELECT pub FROM users WHERE name = ?;", (username,))
+        temp_pub = cursor_obj.fetchone()[0] 
+        active_users_list['response']['users'].append({'name': username, 'pub': temp_pub})
+
+    connection_obj.close()
+
+    print(active_users)
+    sender.send(json.dumps(active_users_list).encode())
+
     return
 
 
@@ -113,7 +150,7 @@ def command_send(sender, message):
         if payload['sender'] == user['name']:
             sender_online = True
     if not sender_online:
-        sender.send('Nie jesteś zalogowany.'.encode('utf-8'))
+        sender.send(gen_response('error', 'you are not logged in').encode())
         return
 
     connection_obj = sqlite3.connect('database.db')
@@ -130,7 +167,7 @@ def command_send(sender, message):
                 return
 
         if not user_exists:
-            sender.send('Odbiorca nie istnieje.'.encode('utf-8'))
+            sender.send(gen_response('error', 'receiver does not exist').encode())
             connection_obj.close()
             return
 
@@ -155,7 +192,7 @@ def command_sync(sender, payload):
         if payload['name'] == user['name']:
             sender_online = True
     if not sender_online:
-        sender.send('Nie jesteś zalogowany.'.encode('utf-8'))
+        sender.send(gen_response('error', 'you are not logged in').encode())
         return
 
     connection_obj = sqlite3.connect('database.db')
